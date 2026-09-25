@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Download,
   Upload,
@@ -10,11 +10,25 @@ import {
   AlertTriangle,
   Info,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  Clock,
+  Target,
+  Flame,
+  Bell,
+  BellOff,
+  Smartphone,
+  Send,
+  Check
 } from 'lucide-react';
 import { Topic, ActivityEntry, OverallStats } from '../types/tracker';
 import { exportTopicsToExcel } from '../utils/excelParser';
 import { exportBackupJSON, importBackupJSON } from '../utils/storage';
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  sendTestNotification
+} from '../utils/notifications';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 
 interface SettingsViewProps {
   topics: Topic[];
@@ -23,6 +37,10 @@ interface SettingsViewProps {
   onOpenUpload: () => void;
   onResetAll: () => void;
   onImportBackup: (topics: Topic[], activityLog: ActivityEntry[]) => void;
+  dailyGoalMinutes: number;
+  onUpdateDailyGoal: (minutes: number) => void;
+  notificationsEnabled: boolean;
+  onToggleNotifications: (enabled: boolean) => Promise<boolean>;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -31,11 +49,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   stats,
   onOpenUpload,
   onResetAll,
-  onImportBackup
+  onImportBackup,
+  dailyGoalMinutes,
+  onUpdateDailyGoal,
+  notificationsEnabled,
+  onToggleNotifications
 }) => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<string>(() => getNotificationPermission());
+  const { isInstallable, isInstalled, isAndroid, isIOS, install } = usePWAInstall();
+  const [inputGoalMinutes, setInputGoalMinutes] = useState<number>(dailyGoalMinutes);
+  const [goalSaved, setGoalSaved] = useState(false);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setInputGoalMinutes(dailyGoalMinutes);
+  }, [dailyGoalMinutes]);
 
   const handleExportExcel = () => {
     exportTopicsToExcel(topics);
@@ -43,7 +74,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const handleExportJSON = () => {
-    exportBackupJSON(topics, activityLog);
+    exportBackupJSON(topics, activityLog, dailyGoalMinutes);
     flashMessage('Full JSON application backup downloaded!');
   };
 
@@ -53,9 +84,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         const file = e.target.files[0];
         const data = await importBackupJSON(file);
         onImportBackup(data.topics, data.activityLog);
+        if (data.dailyGoalMinutes) {
+          onUpdateDailyGoal(data.dailyGoalMinutes);
+        }
         flashMessage(`Successfully imported ${data.topics.length} topics from backup!`);
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : 'Failed to import JSON backup.');
+        setErrorMessage(err instanceof Error ? err.message : 'Failed to import JSON backup.');
+        setTimeout(() => setErrorMessage(null), 4000);
       }
     }
   };
@@ -64,6 +99,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSuccessMessage(msg);
     setTimeout(() => setSuccessMessage(null), 3500);
   };
+
+  const handleSaveGoal = (target: number) => {
+    const valid = Math.max(5, Math.min(720, Math.round(target)));
+    setInputGoalMinutes(valid);
+    onUpdateDailyGoal(valid);
+    setGoalSaved(true);
+    flashMessage(`Daily study time goal updated to ${valid} minutes!`);
+    setTimeout(() => setGoalSaved(false), 2500);
+  };
+
+  const handleToggleNotificationSetting = async () => {
+    if (!isNotificationSupported()) {
+      setErrorMessage('Browser notifications are not supported by this browser.');
+      setTimeout(() => setErrorMessage(null), 3500);
+      return;
+    }
+
+    if (!notificationsEnabled) {
+      const granted = await onToggleNotifications(true);
+      setNotificationPermission(getNotificationPermission());
+      if (granted) {
+        flashMessage('Desktop browser notifications enabled! You will be alerted when Pomodoro timers finish.');
+      } else {
+        setErrorMessage('Notification permission was not granted by your browser.');
+        setTimeout(() => setErrorMessage(null), 4000);
+      }
+    } else {
+      await onToggleNotifications(false);
+      flashMessage('Notifications disabled.');
+    }
+  };
+
+  const handleTestNotificationClick = () => {
+    const sent = sendTestNotification();
+    if (sent) {
+      flashMessage('Test notification sent! Check your desktop notification center.');
+    } else {
+      setErrorMessage('Unable to send notification. Please enable notifications and allow browser permission first.');
+      setTimeout(() => setErrorMessage(null), 4000);
+    }
+  };
+
+  const goalPresets = [
+    { label: '15 min', minutes: 15, tag: 'Brisk' },
+    { label: '30 min', minutes: 30, tag: 'Standard' },
+    { label: '45 min', minutes: 45, tag: 'Recommended' },
+    { label: '60 min', minutes: 60, tag: 'Intensive' },
+    { label: '90 min', minutes: 90, tag: 'Deep Focus' },
+    { label: '120 min', minutes: 120, tag: 'Mastery' },
+  ];
+
+  const weeklyHours = ((inputGoalMinutes * 7) / 60).toFixed(1);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -75,7 +162,242 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* 1. Spreadsheets & Custom Curriculum */}
+      {/* Error Notification */}
+      {errorMessage && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-medium flex items-center gap-2 shadow-sm animate-in fade-in">
+          <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* 1. Daily Study Time Goal Section */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-5 sm:p-6 shadow-2xs space-y-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-blue-600" />
+              Daily Study Time Goal
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Set your target study duration in minutes per day. Your daily progress and streak pace will be tracked and visualized on the Dashboard.
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <span className="font-mono text-lg font-bold text-blue-600">
+              {dailyGoalMinutes}
+            </span>
+            <span className="text-xs text-slate-400 font-mono"> min/day</span>
+          </div>
+        </div>
+
+        {/* Target input and Presets */}
+        <div className="space-y-3">
+          <label className="block text-xs font-semibold text-slate-700">
+            Choose a quick preset or enter custom minutes:
+          </label>
+
+          {/* Quick presets */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {goalPresets.map((preset) => {
+              const isCurrent = inputGoalMinutes === preset.minutes;
+              return (
+                <button
+                  key={preset.minutes}
+                  type="button"
+                  onClick={() => handleSaveGoal(preset.minutes)}
+                  className={`p-2.5 rounded-lg border text-center transition-all ${
+                    isCurrent
+                      ? 'bg-blue-50 border-blue-500 text-blue-800 font-semibold shadow-2xs ring-1 ring-blue-500'
+                      : 'bg-slate-50/70 hover:bg-slate-100 border-slate-200 text-slate-700 font-medium'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{preset.label}</div>
+                  <div className="text-[10px] text-slate-500">{preset.tag}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom Input */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-2">
+            <div className="relative flex-1 max-w-xs">
+              <input
+                type="number"
+                min={5}
+                max={720}
+                step={5}
+                value={inputGoalMinutes}
+                onChange={(e) => setInputGoalMinutes(Number(e.target.value))}
+                className="w-full pl-3 pr-14 py-2 bg-slate-50 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 rounded-lg text-sm font-mono text-slate-900"
+                placeholder="e.g. 45"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-mono pointer-events-none">
+                minutes
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleSaveGoal(inputGoalMinutes)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-semibold rounded-lg shadow-2xs transition-colors"
+            >
+              <Target className="w-3.5 h-3.5" />
+              <span>{goalSaved ? 'Goal Saved!' : 'Save Target'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Goal Projection & Impact Summary */}
+        <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-slate-600">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-orange-500 flex-shrink-0" />
+            <span>
+              At <strong>{inputGoalMinutes} min/day</strong>, you will complete approximately{' '}
+              <strong className="text-slate-900 font-mono">{weeklyHours} hours</strong> of focused learning each week.
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-1 rounded border border-slate-200 shrink-0">
+            ~{Math.round((inputGoalMinutes * 30) / 60)} hrs / month
+          </span>
+        </div>
+      </div>
+
+      {/* 2. Desktop Browser & Web Notifications Section */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-5 sm:p-6 shadow-2xs space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <Bell className="w-4 h-4 text-amber-500" />
+              Desktop & Browser Notifications (Web Notification API)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Receive native system notifications when your 25-minute Pomodoro study timer finishes, even if you are browsing another tab or application.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {notificationsEnabled && notificationPermission === 'granted' ? (
+              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-semibold rounded-lg flex items-center gap-1">
+                <Check className="w-3 h-3 text-emerald-600" />
+                <span>Enabled</span>
+              </span>
+            ) : notificationPermission === 'denied' ? (
+              <span className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-semibold rounded-lg">
+                Blocked in Browser
+              </span>
+            ) : (
+              <span className="px-2.5 py-1 bg-slate-100 text-slate-600 border border-slate-200 text-[11px] font-semibold rounded-lg">
+                Disabled
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h4 className="text-xs font-semibold text-slate-800">
+              Pomodoro Session Finish Alert
+            </h4>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              When enabled, a gentle alert pops up upon completing 25 minutes of deep focus with your session stats and 5-minute break suggestion.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleToggleNotificationSetting}
+              className={`px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-2xs ${
+                notificationsEnabled && notificationPermission === 'granted'
+                  ? 'bg-slate-200 hover:bg-slate-300 text-slate-800'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+              }`}
+            >
+              {notificationsEnabled && notificationPermission === 'granted' ? (
+                <>
+                  <BellOff className="w-3.5 h-3.5" />
+                  <span>Disable</span>
+                </>
+              ) : (
+                <>
+                  <Bell className="w-3.5 h-3.5" />
+                  <span>Enable Notifications</span>
+                </>
+              )}
+            </button>
+
+            {notificationsEnabled && notificationPermission === 'granted' && (
+              <button
+                type="button"
+                onClick={handleTestNotificationClick}
+                className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-xs font-medium transition-colors flex items-center gap-1 shadow-2xs"
+                title="Send a sample notification to your desktop/mobile"
+              >
+                <Send className="w-3 h-3 text-blue-600" />
+                <span>Test Alert</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {notificationPermission === 'denied' && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs flex items-center gap-2">
+            <Info className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              Notifications are currently blocked by your browser settings. To enable, click the tune/lock icon in your address bar and toggle Notifications to &quot;Allow&quot;.
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* 3. Android & Mobile App (PWA) Section */}
+      <div className="bg-white border border-slate-200/90 rounded-xl p-5 sm:p-6 shadow-2xs space-y-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <Smartphone className="w-4 h-4 text-emerald-600" />
+              Android & Mobile App (PWA)
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Install the curriculum tracker as a native Android or mobile app for offline access, full-screen study, and smooth 60fps gesture navigation.
+            </p>
+          </div>
+
+          <span className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg shrink-0 ${
+            isInstalled
+              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+              : 'bg-blue-50 text-blue-700 border border-blue-200'
+          }`}>
+            {isInstalled ? 'Installed Standalone' : isAndroid ? 'Android Ready' : 'Installable PWA'}
+          </span>
+        </div>
+
+        <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h4 className="text-xs font-semibold text-slate-800">
+              {isInstalled ? 'App Installed Successfully' : 'Add to Home Screen / App Drawer'}
+            </h4>
+            <p className="text-[11px] text-slate-500">
+              {isInstalled
+                ? 'You are running the application in native standalone mode.'
+                : 'Experience zero-lag topic tracking, offline cached resources, and background study notifications.'}
+            </p>
+          </div>
+
+          {!isInstalled && (
+            <button
+              type="button"
+              onClick={install}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-2xs transition-colors shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install App</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 4. Spreadsheets & Custom Curriculum */}
       <div className="bg-white border border-slate-200/90 rounded-xl p-5 sm:p-6 shadow-2xs space-y-4">
         <div className="flex items-start justify-between gap-4">
           <div>

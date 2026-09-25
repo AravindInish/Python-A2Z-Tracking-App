@@ -4,13 +4,63 @@ import { INITIAL_TOPICS } from '../data/defaultCurriculum';
 const STORAGE_KEY_TOPICS = 'dsa_tracker_topics_v5';
 const STORAGE_KEY_ACTIVITY = 'dsa_tracker_activity_v5';
 const STORAGE_KEY_SETTINGS = 'dsa_tracker_settings_v5';
+const STORAGE_KEY_STUDY_GOAL = 'dsa_tracker_study_goal_v1';
+const STORAGE_KEY_STUDY_TIME = 'dsa_tracker_study_time_v1';
 
 export interface AppBackup {
   version: string;
   exportedAt: string;
   topics: Topic[];
   activityLog: ActivityEntry[];
+  dailyGoalMinutes?: number;
+  dailyStudyTime?: Record<string, number>;
   settings?: Record<string, unknown>;
+}
+
+export function loadDailyStudyGoal(): number {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_STUDY_GOAL);
+    if (raw) {
+      const parsed = parseInt(raw, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load daily goal from localStorage:', err);
+  }
+  return 45; // Default 45 minutes
+}
+
+export function saveDailyStudyGoal(minutes: number): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_STUDY_GOAL, String(Math.max(5, minutes)));
+  } catch (err) {
+    console.error('Failed to save daily goal to localStorage:', err);
+  }
+}
+
+export function loadDailyStudyTime(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_STUDY_TIME);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load daily study time from localStorage:', err);
+  }
+  return {};
+}
+
+export function saveDailyStudyTime(timeMap: Record<string, number>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_STUDY_TIME, JSON.stringify(timeMap));
+  } catch (err) {
+    console.error('Failed to save daily study time to localStorage:', err);
+  }
 }
 
 export function loadTopics(): Topic[] {
@@ -64,21 +114,37 @@ export function saveActivityLog(logs: ActivityEntry[]): void {
   }
 }
 
-export function resetToDefaults(): { topics: Topic[]; activityLog: ActivityEntry[] } {
+export function resetToDefaults(): {
+  topics: Topic[];
+  activityLog: ActivityEntry[];
+  dailyGoalMinutes: number;
+  dailyStudyTime: Record<string, number>;
+} {
   localStorage.removeItem(STORAGE_KEY_TOPICS);
   localStorage.removeItem(STORAGE_KEY_ACTIVITY);
+  localStorage.removeItem(STORAGE_KEY_STUDY_TIME);
+  saveDailyStudyGoal(45);
   return {
     topics: INITIAL_TOPICS,
-    activityLog: []
+    activityLog: [],
+    dailyGoalMinutes: 45,
+    dailyStudyTime: {}
   };
 }
 
-export function exportBackupJSON(topics: Topic[], activityLog: ActivityEntry[]): void {
+export function exportBackupJSON(
+  topics: Topic[],
+  activityLog: ActivityEntry[],
+  dailyGoalMinutes?: number,
+  dailyStudyTime?: Record<string, number>
+): void {
   const backup: AppBackup = {
-    version: '2.0.0',
+    version: '2.1.0',
     exportedAt: new Date().toISOString(),
     topics,
-    activityLog
+    activityLog,
+    dailyGoalMinutes: dailyGoalMinutes ?? loadDailyStudyGoal(),
+    dailyStudyTime: dailyStudyTime ?? loadDailyStudyTime()
   };
 
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
@@ -92,7 +158,12 @@ export function exportBackupJSON(topics: Topic[], activityLog: ActivityEntry[]):
   URL.revokeObjectURL(url);
 }
 
-export async function importBackupJSON(file: File): Promise<{ topics: Topic[]; activityLog: ActivityEntry[] }> {
+export async function importBackupJSON(file: File): Promise<{
+  topics: Topic[];
+  activityLog: ActivityEntry[];
+  dailyGoalMinutes?: number;
+  dailyStudyTime?: Record<string, number>;
+}> {
   const text = await file.text();
   const parsed = JSON.parse(text) as AppBackup;
 
@@ -104,10 +175,18 @@ export async function importBackupJSON(file: File): Promise<{ topics: Topic[]; a
   if (parsed.activityLog && Array.isArray(parsed.activityLog)) {
     saveActivityLog(parsed.activityLog);
   }
+  if (typeof parsed.dailyGoalMinutes === 'number' && parsed.dailyGoalMinutes > 0) {
+    saveDailyStudyGoal(parsed.dailyGoalMinutes);
+  }
+  if (parsed.dailyStudyTime && typeof parsed.dailyStudyTime === 'object') {
+    saveDailyStudyTime(parsed.dailyStudyTime);
+  }
 
   return {
     topics: parsed.topics,
-    activityLog: parsed.activityLog || []
+    activityLog: parsed.activityLog || [],
+    dailyGoalMinutes: parsed.dailyGoalMinutes,
+    dailyStudyTime: parsed.dailyStudyTime
   };
 }
 

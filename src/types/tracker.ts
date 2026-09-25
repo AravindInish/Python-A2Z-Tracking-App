@@ -78,3 +78,5 @@ export interface ExcelColumnMapping {
   dateCol?: string;
   difficultyCol?: string;
 }
+
+export type DailyStudyLog = Record<string, number>;

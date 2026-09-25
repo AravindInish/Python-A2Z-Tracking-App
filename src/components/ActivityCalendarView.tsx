@@ -41,8 +41,8 @@ export const ActivityCalendarView: React.FC<ActivityCalendarViewProps> = ({
   const heatmapData = useMemo(() => {
     const weeks: { date: string; count: number; active: boolean; dayOfWeek: number }[][] = [];
     const today = new Date();
-    // Normalize to end of day
-    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    // Normalize to noon to eliminate DST or timezone midnight shifts
+    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12, 0, 0);
 
     // We want 24 weeks ending at the upcoming Saturday or current week
     const currentDayOfWeek = endDate.getDay(); // 0 is Sunday, 6 is Saturday
@@ -57,7 +57,7 @@ export const ActivityCalendarView: React.FC<ActivityCalendarViewProps> = ({
     const days: { date: string; count: number; active: boolean; dayOfWeek: number }[] = [];
     const curr = new Date(calendarStart);
 
-    while (curr <= calendarEnd) {
+    while (curr.getTime() <= calendarEnd.getTime()) {
       const year = curr.getFullYear();
       const month = String(curr.getMonth() + 1).padStart(2, '0');
       const day = String(curr.getDate()).padStart(2, '0');
