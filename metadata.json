@@ -1,0 +1,6 @@
+{
+  "name": "DSA & Python Study Tracker",
+  "description": "A focused, modern DSA and Python learning tracker to organize modules, monitor daily study streaks, track topic progress, and manage resources.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
